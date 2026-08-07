@@ -1,3 +1,2 @@
-# Linux libraries required by OpenCV on Streamlit Community Cloud.
 libgl1
 libglib2.0-0
