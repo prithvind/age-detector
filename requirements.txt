@@ -1,10 +1,5 @@
-# TensorFlow 2.15 requires protobuf < 5. Streamlit 1.40.2 keeps that
-# compatible range while supporting Python 3.11.
 streamlit==1.40.2
 deepface==0.0.100
-tensorflow==2.15.0
-keras==2.15.0
 opencv-python-headless==4.11.0.86
 numpy==1.26.4
-protobuf==4.25.3
 Pillow==10.4.0

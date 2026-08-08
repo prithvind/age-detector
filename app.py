@@ -1,3 +1,4 @@
+import gc
 import os
 import sys
 from pathlib import Path
@@ -13,12 +14,13 @@ import tensorflow.keras  # noqa: F401
 
 # Keep DeepFace model downloads in the project, where this app can write them.
 os.environ.setdefault("DEEPFACE_HOME", str(Path(__file__).resolve().parent))
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 import streamlit as st
 from deepface import DeepFace
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 st.set_page_config(page_title="Face Insight AI", layout="wide", page_icon="🧠")
 
@@ -82,10 +84,25 @@ def age_group(age: int) -> str:
         return "45–59"
     return "60+"
 
+
+def prepare_image(uploaded_file) -> np.ndarray:
+    """Load and downscale an uploaded image to reduce memory pressure."""
+    image = Image.open(uploaded_file)
+    image = ImageOps.exif_transpose(image).convert("RGB")
+
+    max_dim = 720
+    if max(image.size) > max_dim:
+        scale = max_dim / max(image.size)
+        new_size = (max(1, int(image.width * scale)), max(1, int(image.height * scale)))
+        image = image.resize(new_size, Image.Resampling.LANCZOS)
+
+    return np.array(image)
+
+
 uploaded_file = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGB")
+    image = Image.fromarray(prepare_image(uploaded_file))
     img_array = np.array(image)
 
     col1, col2 = st.columns([1, 1.3])
@@ -95,8 +112,10 @@ if uploaded_file is not None:
             analysis = DeepFace.analyze(
                 img_path=img_array,
                 actions=['age', 'gender', 'emotion'],
-                enforce_detection=True,
-                detector_backend="retinaface",
+                enforce_detection=False,
+                detector_backend="opencv",
+                align=False,
+                silent=True,
             )
             # DeepFace returns one dictionary for a single face and a list for
             # multiple faces. Keep the rendering code consistent in both cases.
@@ -112,6 +131,13 @@ if uploaded_file is not None:
                 st.code(message)
 
     if results:
+        try:
+            import tensorflow as tf
+            tf.keras.backend.clear_session()
+        except Exception:
+            pass
+        gc.collect()
+
         # DeepFace returns a list, one entry per detected face
         frame = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
 
