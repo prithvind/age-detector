@@ -75,7 +75,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="main-title">🧠 Face Insight AI</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Upload a photo to analyze age, gender, and emotion using deep learning.</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Upload a photo to analyze age and gender with a lighter model setup.</p>', unsafe_allow_html=True)
 
 if DeepFace is None:
     st.error("The analysis engine could not be loaded. Please try again shortly.")
@@ -130,7 +130,7 @@ if uploaded_file is not None:
         try:
             analysis = DeepFace.analyze(
                 img_path=img_array,
-                actions=['age', 'gender', 'emotion'],
+                actions=['age', 'gender'],
                 enforce_detection=False,
                 detector_backend="opencv",
                 align=False,
@@ -177,11 +177,7 @@ if uploaded_file is not None:
                 estimated_age_group = age_group(face['age'])
                 gender = face['dominant_gender']
                 gender_conf = face['gender'][gender]
-                emotion = face['dominant_emotion']
-                emotion_conf = face['emotion'][emotion]
-                emoji = EMOTION_EMOJIS.get(emotion, "🙂")
-
-                m1, m2, m3 = st.columns(3)
+                m1, m2 = st.columns(2)
                 with m1:
                     st.markdown(f"""
                         <div class="metric-card">
@@ -197,19 +193,5 @@ if uploaded_file is not None:
                             <div class="metric-label">{gender_conf:.0f}% confidence</div>
                         </div>
                     """, unsafe_allow_html=True)
-                with m3:
-                    st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">Emotion</div>
-                            <div class="metric-value">{emoji} {emotion.capitalize()}</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-
-                st.write("")
-                st.markdown("**Emotion breakdown**")
-                emotion_scores = dict(sorted(face['emotion'].items(), key=lambda x: x[1], reverse=True))
-                for emo, score in emotion_scores.items():
-                    st.write(f"{EMOTION_EMOJIS.get(emo, '')} {emo.capitalize()}")
-                    st.progress(min(int(score), 100))
 
                 st.divider()
