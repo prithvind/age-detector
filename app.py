@@ -133,6 +133,27 @@ def predict_age(face: np.ndarray) -> str:
     return AGE_LABELS[age_idx]
 
 
+def predict_gender(face: np.ndarray) -> tuple[str, str]:
+    """Best-effort gender prediction from a cropped face image."""
+    try:
+        gender_result = DeepFace.analyze(
+            img_path=face,
+            actions=['gender'],
+            enforce_detection=False,
+            detector_backend='opencv',
+            align=False,
+            silent=True,
+        )
+        if isinstance(gender_result, list):
+            gender_result = gender_result[0]
+        gender = gender_result.get('dominant_gender', 'unknown')
+        gender_conf = gender_result.get('gender', {}).get(gender, 0)
+        label = gender.capitalize() if gender != 'unknown' else 'Unknown'
+        return label, f"{float(gender_conf):.0f}%"
+    except Exception:
+        return 'Unknown', 'N/A'
+
+
 def prepare_image(uploaded_file) -> np.ndarray:
     """Load and downscale an uploaded image to reduce memory pressure."""
     image = Image.open(uploaded_file)
@@ -181,6 +202,7 @@ if uploaded_file is not None:
                     face_crop = frame_bgr[max(0, y1 - 20):min(y2 + 20, frame_bgr.shape[0] - 1),
                                           max(0, x1 - 20):min(x2 + 20, frame_bgr.shape[1] - 1)]
                     estimated_age_group = predict_age(face_crop)
+                    gender_label, gender_conf = predict_gender(face_crop)
                     m1, m2 = st.columns(2)
                     with m1:
                         st.markdown(f"""
@@ -190,11 +212,11 @@ if uploaded_file is not None:
                             </div>
                         """, unsafe_allow_html=True)
                     with m2:
-                        st.markdown("""
+                        st.markdown(f"""
                             <div class="metric-card">
                                 <div class="metric-label">Gender</div>
-                                <div class="metric-value">N/A</div>
-                                <div class="metric-label">Using lighter age model</div>
+                                <div class="metric-value">{gender_label}</div>
+                                <div class="metric-label">{gender_conf} confidence</div>
                             </div>
                         """, unsafe_allow_html=True)
 
