@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: face-insight-ai
+    runtime: docker
+    repo: https://github.com/your-username/your-repo
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 10000
