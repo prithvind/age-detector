@@ -10,17 +10,30 @@ if hasattr(sys.stdout, "reconfigure"):
 
 # DeepFace accesses ``tensorflow.keras`` during import. Import it first so
 # TensorFlow initializes its lazy Keras module correctly on Windows.
-import tensorflow.keras  # noqa: F401
+try:
+    import tensorflow.keras  # noqa: F401
+except Exception as exc:  # pragma: no cover - import-time fallback
+    tensorflow = None
+    TENSORFLOW_IMPORT_ERROR = exc
+else:
+    TENSORFLOW_IMPORT_ERROR = None
 
 # Keep DeepFace model downloads in the project, where this app can write them.
 os.environ.setdefault("DEEPFACE_HOME", str(Path(__file__).resolve().parent))
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 import streamlit as st
-from deepface import DeepFace
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
+
+try:
+    from deepface import DeepFace
+except Exception as exc:  # pragma: no cover - import-time fallback
+    DeepFace = None
+    DEEPFACE_IMPORT_ERROR = exc
+else:
+    DEEPFACE_IMPORT_ERROR = None
 
 st.set_page_config(page_title="Face Insight AI", layout="wide", page_icon="🧠")
 
@@ -63,6 +76,12 @@ st.markdown("""
 
 st.markdown('<p class="main-title">🧠 Face Insight AI</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Upload a photo to analyze age, gender, and emotion using deep learning.</p>', unsafe_allow_html=True)
+
+if DeepFace is None:
+    st.error("The analysis engine could not be loaded. Please try again shortly.")
+    with st.expander("Technical details"):
+        st.code(str(DEEPFACE_IMPORT_ERROR or TENSORFLOW_IMPORT_ERROR))
+    st.stop()
 
 EMOTION_EMOJIS = {
     "happy": "😄", "sad": "😢", "angry": "😠", "surprise": "😲",
