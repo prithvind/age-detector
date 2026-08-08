@@ -3,6 +3,10 @@ import os
 import sys
 from pathlib import Path
 
+import cv2
+import numpy as np
+from PIL import Image, ImageOps
+
 # DeepFace logs emoji while downloading its models. Windows consoles commonly
 # default to cp1252, which cannot encode them and aborts the download.
 if hasattr(sys.stdout, "reconfigure"):
@@ -23,9 +27,6 @@ os.environ.setdefault("DEEPFACE_HOME", str(Path(__file__).resolve().parent))
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 
 import streamlit as st
-import cv2
-import numpy as np
-from PIL import Image, ImageOps
 
 try:
     from deepface import DeepFace
@@ -34,6 +35,18 @@ except Exception as exc:  # pragma: no cover - import-time fallback
     DEEPFACE_IMPORT_ERROR = exc
 else:
     DEEPFACE_IMPORT_ERROR = None
+
+# Use the project's OpenCV age model for more reliable age estimates on
+# smaller and younger faces than the generic DeepFace age path.
+FACE_PROTO = str(Path(__file__).resolve().parent / "opencv_face_detector.pbtxt")
+FACE_MODEL = str(Path(__file__).resolve().parent / "opencv_face_detector_uint8.pb")
+AGE_PROTO = str(Path(__file__).resolve().parent / "age_deploy.prototxt")
+AGE_MODEL = str(Path(__file__).resolve().parent / "age_net.caffemodel")
+MODEL_MEAN_VALUES = (78.4263377603, 87.7689143744, 114.895847746)
+AGE_LABELS = ['0–2', '4–6', '8–12', '15–20', '25–32', '38–43', '48–53', '60+']
+
+face_net = cv2.dnn.readNetFromTensorflow(FACE_MODEL, FACE_PROTO)
+age_net = cv2.dnn.readNetFromCaffe(AGE_PROTO, AGE_MODEL)
 
 st.set_page_config(page_title="Face Insight AI", layout="wide", page_icon="🧠")
 
@@ -90,18 +103,34 @@ EMOTION_EMOJIS = {
 
 
 def age_group(age: int) -> str:
-    """Convert DeepFace's estimated age into a more reliable age range."""
-    if age <= 12:
-        return "0–12"
-    if age <= 19:
-        return "13–19"
-    if age <= 29:
-        return "20–29"
-    if age <= 44:
-        return "30–44"
-    if age <= 59:
-        return "45–59"
-    return "60+"
+    """Map a model age bucket to a readable label."""
+    return AGE_LABELS[min(max(age, 0), len(AGE_LABELS) - 1)]
+
+
+def detect_faces(frame: np.ndarray, conf_threshold: float = 0.7):
+    frame_height = frame.shape[0]
+    frame_width = frame.shape[1]
+    blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), [104, 117, 123], False, False)
+    face_net.setInput(blob)
+    detections = face_net.forward()
+    face_boxes = []
+    for i in range(detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        if confidence > conf_threshold:
+            x1 = int(detections[0, 0, i, 3] * frame_width)
+            y1 = int(detections[0, 0, i, 4] * frame_height)
+            x2 = int(detections[0, 0, i, 5] * frame_width)
+            y2 = int(detections[0, 0, i, 6] * frame_height)
+            face_boxes.append([x1, y1, x2, y2])
+    return face_boxes
+
+
+def predict_age(face: np.ndarray) -> str:
+    blob = cv2.dnn.blobFromImage(face, 1.0, (227, 227), MODEL_MEAN_VALUES, swapRB=False)
+    age_net.setInput(blob)
+    age_preds = age_net.forward()
+    age_idx = int(age_preds[0].argmax())
+    return AGE_LABELS[age_idx]
 
 
 def prepare_image(uploaded_file) -> np.ndarray:
@@ -128,70 +157,57 @@ if uploaded_file is not None:
 
     with st.spinner("Analyzing face..."):
         try:
-            analysis = DeepFace.analyze(
-                img_path=img_array,
-                actions=['age', 'gender'],
-                enforce_detection=False,
-                detector_backend="opencv",
-                align=False,
-                silent=True,
-            )
-            # DeepFace returns one dictionary for a single face and a list for
-            # multiple faces. Keep the rendering code consistent in both cases.
-            results = analysis if isinstance(analysis, list) else [analysis]
-        except Exception as e:
-            results = None
-            message = str(e)
-            if "face could not be detected" in message.lower():
+            frame_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+            face_boxes = detect_faces(frame_bgr)
+            if not face_boxes:
                 st.warning("No face was detected. Use a clear, front-facing photo with good lighting.")
-            else:
-                st.error("Analysis could not complete. Open Technical details below for the exact reason.")
+                st.stop()
+
+            for x1, y1, x2, y2 in face_boxes:
+                face_crop = frame_bgr[max(0, y1 - 20):min(y2 + 20, frame_bgr.shape[0] - 1),
+                                      max(0, x1 - 20):min(x2 + 20, frame_bgr.shape[1] - 1)]
+                cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), (99, 102, 241), 3)
+
+            result_img = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+
+            with col1:
+                st.image(result_img, use_container_width=True, caption="Detected face(s)")
+
+            with col2:
+                for i, (x1, y1, x2, y2) in enumerate(face_boxes):
+                    if len(face_boxes) > 1:
+                        st.markdown(f"#### Face {i + 1}")
+
+                    face_crop = frame_bgr[max(0, y1 - 20):min(y2 + 20, frame_bgr.shape[0] - 1),
+                                          max(0, x1 - 20):min(x2 + 20, frame_bgr.shape[1] - 1)]
+                    estimated_age_group = predict_age(face_crop)
+                    m1, m2 = st.columns(2)
+                    with m1:
+                        st.markdown(f"""
+                            <div class="metric-card">
+                                <div class="metric-label">Age group</div>
+                                <div class="metric-value">{estimated_age_group}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                    with m2:
+                        st.markdown("""
+                            <div class="metric-card">
+                                <div class="metric-label">Gender</div>
+                                <div class="metric-value">N/A</div>
+                                <div class="metric-label">Using lighter age model</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+
+                    st.divider()
+        except Exception as e:
+            message = str(e)
+            st.error("Analysis could not complete. Open Technical details below for the exact reason.")
             with st.expander("Technical details"):
                 st.code(message)
 
-    if results:
-        try:
-            import tensorflow as tf
-            tf.keras.backend.clear_session()
-        except Exception:
-            pass
-        gc.collect()
-
-        # DeepFace returns a list, one entry per detected face
-        frame = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-
-        for face in results:
-            x, y, w, h = face['region']['x'], face['region']['y'], face['region']['w'], face['region']['h']
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (99, 102, 241), 3)
-
-        result_img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        with col1:
-            st.image(result_img, use_container_width=True, caption="Detected face(s)")
-
-        with col2:
-            for i, face in enumerate(results):
-                if len(results) > 1:
-                    st.markdown(f"#### Face {i + 1}")
-
-                estimated_age_group = age_group(face['age'])
-                gender = face['dominant_gender']
-                gender_conf = face['gender'][gender]
-                m1, m2 = st.columns(2)
-                with m1:
-                    st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">Age group</div>
-                            <div class="metric-value">{estimated_age_group}</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-                with m2:
-                    st.markdown(f"""
-                        <div class="metric-card">
-                            <div class="metric-label">Gender</div>
-                            <div class="metric-value">{gender}</div>
-                            <div class="metric-label">{gender_conf:.0f}% confidence</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-
-                st.divider()
+    try:
+        import tensorflow as tf
+        tf.keras.backend.clear_session()
+    except Exception:
+        pass
+    gc.collect()
