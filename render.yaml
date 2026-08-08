@@ -2,7 +2,7 @@ services:
   - type: web
     name: face-insight-ai
     runtime: docker
-    repo: https://github.com/your-username/your-repo
+    repo: https://github.com/prithvind/age-detector.git
     branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
